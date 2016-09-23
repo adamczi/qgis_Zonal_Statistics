@@ -22,7 +22,7 @@
 """
 from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QVariant
 from PyQt4.QtGui import QAction, QIcon, QTableWidgetItem, QToolBar
-from qgis.core import QgsMapLayerRegistry, QgsField, QgsMapLayer
+from qgis.core import QgsMapLayerRegistry, QgsField, QgsMapLayer, QgsCoordinateReferenceSystem, QgsCoordinateTransform
 from qgis.gui import QgsMessageBar
 # Initialize Qt resources from file resources.py
 import resources
@@ -96,7 +96,6 @@ class ZonalStatistics:
         self.dlg.pushButton_2.clicked.connect(self.addToAttrTable_group)
 
         self.table.pushButton_6.clicked.connect(self.spatialQuery)
-
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -251,20 +250,35 @@ class ZonalStatistics:
             PolyName = self.dlg.comboBox.currentText()
             layerList_Poly = QgsMapLayerRegistry.instance().mapLayersByName(PolyName)
             self.polygons = [feature for feature in layerList_Poly[0].getFeatures()]
-            print len(self.polygons)
+            polyCRS = int(layerList_Poly[0].crs().authid()[5:])
 
             PointName = self.dlg.comboBox_3.currentText()
             layerList_Point = QgsMapLayerRegistry.instance().mapLayersByName(PointName)
             self.points = [feature for feature in layerList_Point[0].getFeatures()]
+            pointCRS = int(layerList_Point[0].crs().authid()[5:])          
 
             self.groups = []
             self.values = []    
             count = -1
+            maximum = len(self.polygons)
             currentField = self.dlg.comboBox_2.currentText()
 
-            for fPoly in self.polygons:
+            for fPoly in self.polygons:        
                 self.values.append([])
                 poly_geom = fPoly.geometry()
+
+                ## Progress bar part
+                status = count+2
+                progress = int(round(status/float(maximum)*100))
+                self.increaseProgressBar(progress)                
+
+                ## Change CRS if different
+                if polyCRS != pointCRS:
+                    crsSrc = QgsCoordinateReferenceSystem(polyCRS)
+                    crsDest = QgsCoordinateReferenceSystem(pointCRS)
+                    xform = QgsCoordinateTransform(crsSrc, crsDest)
+                    poly_geom.transform(xform)   
+
                 try:
                     self.groups.append(fPoly[1])
                 except KeyError:
@@ -278,10 +292,17 @@ class ZonalStatistics:
                     if poly_geom.contains(pt_geom):
                         self.values[count].append(fPoint[currentField])
 
+                ## Change back if it was different
+                if polyCRS != pointCRS:
+                    xform = QgsCoordinateTransform(crsDest, crsSrc)
+                    poly_geom.transform(xform)
+
+
             self.x = list(enumerate(self.groups))
 
             self.prepareGraph()
             self.prepareTable()
+
         except IndexError:
             # self.iface.messageBar().pushMessage("Error", u"Brak dostępnych warstw wektorowych lub warstwa usunięta", level=QgsMessageBar.CRITICAL, duration=4)
             pass
@@ -329,8 +350,6 @@ class ZonalStatistics:
 
     def buildGraph(self):
         """ Add data to the graph """
-        pyqtgraph.setConfigOption('background', (230,230,230))
-        pyqtgraph.setConfigOption('foreground', (100,100,100))
         dataColor = (102,178,255)
         dataBorderColor = (180,220,255)
         barGraph = self.graph.plotWidget
@@ -442,11 +461,18 @@ class ZonalStatistics:
             columnid = layerPoly.fieldNameIndex(newName)
             count = 0
 
-            layerPoly.startEditing()
+            ## Progress bar part
+            maximum = 0
             for feature in features:
+                maximum += 1
 
+            layerPoly.startEditing()
+
+            ## Get features again as they were 'used' to get 'maximum'
+            features = layerPoly.getFeatures() 
+
+            for feature in features:
                 fid = feature.id()
-                
                 ## Prepare data
                 if self.dlg.comboBox_4.currentIndex() == 0:
                     item = round(self.y[count],2)
@@ -458,8 +484,11 @@ class ZonalStatistics:
                 else:
                     item = len(self.values[count])
 
-                ## Update attribute table            
+                ## Progress bar part
+                progress = int(round((count+1)/float(maximum)*100))
+                self.increaseProgressBar(progress)  
 
+                ## Update attribute table            
                 layerPoly.changeAttributeValue(fid, columnid, item, True)
                 count += 1
 
@@ -487,14 +516,20 @@ class ZonalStatistics:
         if self.dlg.comboBox_2.count() > 0:
             self.showTable()
 
+    def increaseProgressBar(self, value):
+        self.dlg.progressBar.setValue(value)  
+
     def run(self):
         """Run method that performs all the real work"""
+
+        ## Reset progress bar
+        self.dlg.progressBar.setValue(0)
 
         ## Update available layers
         self.availableLayers()
 
         ## Update available fields
-        self.fieldsToAnalyse()      
+        self.fieldsToAnalyse()    
         
         ## Listen to features selection on row click
         self.table.tableWidget.verticalHeader().sectionClicked.connect(self.rowSelection)
