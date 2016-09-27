@@ -232,7 +232,7 @@ class ZonalStatistics:
 
             self.dlg.comboBox_2.clear()
             for field in layer.pendingFields():
-                if field.typeName() in ("Real", "real", "Integer", "integer", "Double", "double") and field.name() not in ("id", "ID", "Id", "iD"):
+                if field.typeName() in ("Real", "real", "Integer", "integer","Integer64", "integer64", "Double", "double") and field.name() not in ("id", "ID", "Id", "iD"):
                     self.dlg.comboBox_2.addItem(field.name())
         except IndexError:
             self.dlg.comboBox_2.clear()
@@ -529,7 +529,7 @@ class ZonalStatistics:
         self.availableLayers()
 
         ## Update available fields
-        self.fieldsToAnalyse()    
+        # self.fieldsToAnalyse()    
         
         ## Listen to features selection on row click
         self.table.tableWidget.verticalHeader().sectionClicked.connect(self.rowSelection)
